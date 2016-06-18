@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Google Books</string>
+    <string name="action_settings">Settings</string>
+    <string name="empty_listView">Please search for a book</string>
+</resources>
