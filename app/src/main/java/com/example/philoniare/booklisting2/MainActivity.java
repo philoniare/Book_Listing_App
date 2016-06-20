@@ -7,6 +7,7 @@ import android.support.v4.view.MenuItemCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.SearchView;
 import android.support.v7.widget.Toolbar;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.ListView;
@@ -26,6 +27,7 @@ import java.lang.reflect.Type;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -35,6 +37,7 @@ public class MainActivity extends AppCompatActivity {
     private ListView booksListView;
     private List<BookItem> mBooks;
     private BookListAdapter mBookListAdapter;
+    private TextView empty_listView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,8 +51,9 @@ public class MainActivity extends AppCompatActivity {
         booksListView = (ListView) findViewById(R.id.booksListView);
         mBookListAdapter = new BookListAdapter(this, R.layout.book_item, mBooks);
         booksListView.setAdapter(mBookListAdapter);
-        TextView empty_listView = (TextView) findViewById(R.id.empty_listView);
+        empty_listView = (TextView) findViewById(R.id.empty_listView);
         booksListView.setEmptyView(empty_listView);
+
     }
 
     @Override
@@ -86,16 +90,19 @@ public class MainActivity extends AppCompatActivity {
         protected String doInBackground(String... params) {
             HttpURLConnection conn = null;
             try {
-                URL url = new URL("https://www.googleapis.com/books/v1/volumes?q=" + params[0] + "&maxResults=10");
+                String formattedParam = URLEncoder.encode(params[0]);
+                URL url = new URL("https://www.googleapis.com/books/v1/volumes?q=" + formattedParam + "&maxResults=10");
+                Log.d("Requested URL", "https://www.googleapis.com/books/v1/volumes?q=" + formattedParam + "&maxResults=10");
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.connect();
                 int status = conn.getResponseCode();
+                Log.d("HTTPStatus", Integer.toString(status));
                 switch (status) {
                     case 200:
-                        // return the response as String for json parsing
                         BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                         StringBuilder sb = new StringBuilder();
+                        // return the response as String for json parsing
                         String line;
                         while ((line = br.readLine()) != null) {
                             sb.append(line+"\n");
@@ -104,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
                         return sb.toString();
                     default:
                         // server request unsuccessful
-                        Logger.getLogger(getClass().getName()).log(Level.SEVERE, null, "Error with HTTP request");
+                        Log.d("HTTP REQUEST", "BAD RESPONSE");
                 }
 
             } catch (MalformedURLException ex) {
@@ -120,49 +127,57 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             }
-            return "Executed";
+            return null;
         }
 
         @Override
         protected void onPostExecute(String result) {
-            // Parse the response json
-            JsonParser parser = new JsonParser();
-            JsonObject element = parser.parse(result).getAsJsonObject();
-            JsonElement responseList = element.get("items");
-            JsonArray bookList = responseList.getAsJsonArray();
-
             mBooks.clear();
-            for(JsonElement book : bookList) {
-                JsonObject bookObj = book.getAsJsonObject();
-                JsonElement bookVolumeInfo = bookObj.get("volumeInfo");
-                JsonObject bookVolumeInfoObj = bookVolumeInfo.getAsJsonObject();
+            if (result != null) {
+                // Parse the response json
+                JsonParser parser = new JsonParser();
+                JsonObject element = parser.parse(result).getAsJsonObject();
+                JsonElement responseList = element.get("items");
+                if (responseList != null) {
+                    JsonArray bookList = responseList.getAsJsonArray();
 
-                // Parse the title
-                JsonElement bookTitle = bookVolumeInfoObj.get("title");
+                    for (JsonElement book : bookList) {
+                        JsonObject bookObj = book.getAsJsonObject();
+                        JsonElement bookVolumeInfo = bookObj.get("volumeInfo");
+                        JsonObject bookVolumeInfoObj = bookVolumeInfo.getAsJsonObject();
 
-                // Parse the authors
-                Type listType = new TypeToken<List<String>>() {}.getType();
-                List<String> authorsList = new Gson().fromJson(bookVolumeInfoObj.get("authors"), listType);
-                String parsedBookTitle = bookTitle.toString().substring(1, bookTitle.toString().length() - 1);
-                String bookDetails;
-                if (authorsList.size() > 0) {
-                    bookDetails = parsedBookTitle + " by " + authorsList.get(0);
-                    for(int i = 1; i < authorsList.size(); i++) {
-                        bookDetails += ", " + authorsList.get(i);
+                        // Parse the title
+                        JsonElement bookTitle = bookVolumeInfoObj.get("title");
+
+                        // Parse the authors
+                        Type listType = new TypeToken<List<String>>() {
+                        }.getType();
+                        List<String> authorsList = new Gson().fromJson(bookVolumeInfoObj.get("authors"), listType);
+                        String parsedBookTitle = bookTitle.toString().substring(1, bookTitle.toString().length() - 1);
+                        String bookDetails;
+                        if (authorsList != null && authorsList.size() > 0) {
+                            bookDetails = parsedBookTitle + " by " + authorsList.get(0);
+                            for (int i = 1; i < authorsList.size(); i++) {
+                                bookDetails += ", " + authorsList.get(i);
+                            }
+                        } else {
+                            // No book authors were given
+                            bookDetails = parsedBookTitle;
+                        }
+
+                        // Parse the thumbnail
+                        JsonElement imageLinks = bookVolumeInfoObj.get("imageLinks");
+                        if (imageLinks != null) {
+                            JsonObject imageLinksObj = imageLinks.getAsJsonObject();
+                            String imageUrl = imageLinksObj.get("smallThumbnail").toString();
+                            mBooks.add(new BookItem(bookDetails, imageUrl.substring(1, imageUrl.length() - 1)));
+                        } else {
+                            // no thumbnail found, imageView empty
+                            mBooks.add(new BookItem(bookDetails, ""));
+                        }
                     }
                 } else {
-                    bookDetails = parsedBookTitle;
-                }
-
-                // Parse the thumbnail
-                JsonElement imageLinks = bookVolumeInfoObj.get("imageLinks");
-                if (imageLinks != null) {
-                    JsonObject imageLinksObj = imageLinks.getAsJsonObject();
-                    String imageUrl = imageLinksObj.get("smallThumbnail").toString();
-                    mBooks.add(new BookItem(bookDetails, imageUrl.substring(1, imageUrl.length() - 1)));
-                } else {
-                    // no thumbnail found, imageView empty
-                    mBooks.add(new BookItem(bookDetails, ""));
+                    empty_listView.setText(getString(R.string.no_books_found));
                 }
             }
             mBookListAdapter.notifyDataSetChanged();
